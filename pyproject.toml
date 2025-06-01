@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "feedly-to-google-drive-archiver"
+version = "0.1.0"
+description = ""
+authors = ["fdt-naoki-sakamoto <naoki.sakamoto@fastdoctor.jp>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+google-api-python-client = "^2.170.0"
+google-auth-httplib2 = "^0.2.0"
+google-auth = "^2.40.2"
+requests = "^2.32.3"
+pathvalidate = "^3.2.3"
+python-dotenv = "^1.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
