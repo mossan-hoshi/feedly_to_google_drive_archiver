@@ -213,45 +213,6 @@
 * 記事データを含むJSONファイルが指定されたGoogle Driveフォルダに表示されます
 * 実行の詳細やエラーについては、ファンクション（`feedly-to-drive-archiver`）のCloud Loggingを確認してください
 
-## 現在の実装状況
-
-**✅ 完了済み機能：**
-- Poetry仮想環境のセットアップと依存関係管理
-- 環境変数管理（`.env`ファイルとpython-dotenv）
-- **Feedly APIクライアント機能**：
-  - 完全なページネーション対応
-  - レート制限とエラーハンドリング
-  - 記事データの構造化抽出
-- **JSON変換機能**：
-  - ISO 8601日付形式への変換
-  - 構造化されたJSONデータ出力
-- **ファイル名サニタイゼーション**：
-  - `pathvalidate`ライブラリを使用した安全なファイル名生成
-- **ローカルテスト環境**：
-  - コマンドライン実行とログ出力
-
-**✅ 完了済み機能（追加）：**
-- **Google Drive APIクライアント機能**：
-  - サービスアカウント認証を使用したGoogle Drive API連携
-  - JSONファイルのアップロード機能
-  - 詳細なエラーハンドリングと権限チェック
-  - ローカルテスト用のテストスクリプト
-- **エンドツーエンド ローカルテスト環境**：
-  - 完全なワークフロー（Feedly取得→変換→Google Driveアップロード）
-  - 環境変数を使用した設定管理
-  - 詳細なログ出力と進行状況追跡
-
-**⏳ 実装中/未完了：**
-- Cloud Function用の実装調整（TODO 2.1-2.6）
-- デプロイとスケジューリングの設定（TODO 3.1-3.2）
-
-**🧪 テスト済み：**
-- Feedly API接続とレート制限の適切なハンドリング
-- 環境変数の読み込みと設定
-- JSON変換機能の動作確認
-- Google Drive APIアップロード機能
-- エンドツーエンドワークフローの動作確認
-
 ## コスト最適化
 
 このシステムは非常にコスト効率的になるよう設計されています：
@@ -318,13 +279,13 @@
 
 ### フェーズ2: GCP Cloud Function実装
 
-* **TODO 2.1: Cloud Functionエントリーポイント用に適応（`main.py`）**
-    * アクション：HTTPトリガー用のCloud Functionエントリーポイント`def main(request):`を作成
-    * アクション：ローカルテストスクリプトからコアロジックをこの関数に移動
+* ✅**TODO 2.1: Cloud Functionエントリーポイント用に適応（`main.py`）**
+    * ✅アクション：HTTPトリガー用のCloud Functionエントリーポイント`def main(request):`を作成
+    * ✅アクション：ローカルテストスクリプトからコアロジックをこの関数に移動
 
-* **TODO 2.2: 環境変数の取得（dotenv不使用、GCP環境変数使用）**
-    * アクション：`main`で、環境変数（`os.environ.get()`）から`FEEDLY_ACCESS_TOKEN`、`GOOGLE_DRIVE_FOLDER_ID`、`FEEDLY_STREAM_ID`、`FETCH_PERIOD_DAYS`、`GCP_PROJECT_ID`を読み取り
-    * アクション：`FETCH_PERIOD_DAYS`に基づいて`newer_than_timestamp_ms`を計算
+* ✅ **TODO 2.2: 環境変数の取得（dotenv不使用、GCP環境変数使用）**
+    * ✅ アクション：`main`で、環境変数（`os.environ.get()`）から`FEEDLY_ACCESS_TOKEN`、`GOOGLE_DRIVE_FOLDER_ID`、`FEEDLY_STREAM_ID`、`FETCH_PERIOD_DAYS`、`GCP_PROJECT_ID`を読み取り
+    * ✅ アクション：`FETCH_PERIOD_DAYS`に基づいて`newer_than_timestamp_ms`を計算
 
 * **TODO 2.3: Cloud Function用にGoogle Driveアップロードを適応（ADC）**
     * アクション：Cloud Functionsで実行時にApplication Default Credentials（ADC）を使用するよう`upload_to_google_drive`を変更。`google.auth.default()`が認証情報を提供可能
