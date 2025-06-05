@@ -75,6 +75,42 @@
 
 詳細な図については、システム仕様書を参照してください。
 
+## 実装詳細
+
+### 認証方式
+
+このプロジェクトは、実行環境に応じて2つの認証方式をサポートしています：
+
+#### Cloud Functions環境
+- **Application Default Credentials (ADC)** を使用
+- `google.auth.default()` で自動的に認証情報を取得
+- Cloud Functions実行時にGCPが提供するサービスアカウントを使用
+- サービスアカウントファイルは不要
+- 関数: `upload_to_google_drive_adc()`
+
+#### ローカルテスト環境
+- **サービスアカウントJSONファイル** を使用
+- `.env`ファイルで`GOOGLE_SERVICE_ACCOUNT_FILE`パスを指定
+- ローカル開発とテスト用
+- 関数: `upload_to_google_drive()`
+
+### 主要機能
+
+1. **Feedly API連携**
+   - ページネーション対応（`continuation`パラメータ）
+   - 指定期間によるフィルタリング
+   - レート制限とエラーハンドリング
+
+2. **データ変換**
+   - Feedly形式からカスタムJSON形式への変換
+   - ファイル名の安全化処理
+   - 日付形式の正規化
+
+3. **Google Drive統合**
+   - 環境に応じた認証方式の自動切り替え
+   - 構造化されたJSONファイルのアップロード
+   - エラーハンドリングとログ出力
+
 ## セットアップ手順
 
 ### 1. GCPプロジェクトの設定
@@ -287,25 +323,28 @@
     * ✅ アクション：`main`で、環境変数（`os.environ.get()`）から`FEEDLY_ACCESS_TOKEN`、`GOOGLE_DRIVE_FOLDER_ID`、`FEEDLY_STREAM_ID`、`FETCH_PERIOD_DAYS`、`GCP_PROJECT_ID`を読み取り
     * ✅ アクション：`FETCH_PERIOD_DAYS`に基づいて`newer_than_timestamp_ms`を計算
 
-* **TODO 2.3: Cloud Function用にGoogle Driveアップロードを適応（ADC）**
-    * アクション：Cloud Functionsで実行時にApplication Default Credentials（ADC）を使用するよう`upload_to_google_drive`を変更。`google.auth.default()`が認証情報を提供可能
-    * アクション：GCPで実行時は`service_account_file_path`パラメータは不要。関数は条件チェックを持つか、GCP用の別関数にできる
-    * 検証：Driveにアクセスしようとする最小限の関数をデプロイしてこの部分をテスト
+* ✅ **TODO 2.3: Cloud Function用にGoogle Driveアップロードを適応（ADC）**
+    * ✅ アクション：Cloud Functionsで実行時にApplication Default Credentials（ADC）を使用する新しい関数`upload_to_google_drive_adc()`を作成。`google.auth.default()`が認証情報を提供
+    * ✅ アクション：既存の`upload_to_google_drive()`関数は本テスト用に保持し、Cloud Function用とローカルテスト用の両方をサポート
+    * ✅ アクション：Cloud Functionの`main()`関数でADC関数を使用するよう変更
+    * ✅ 検証：ADCを使用してGoogle Driveにアクセスする実装が完了
 
-* **TODO 2.4: 堅牢なログの実装**
-    * アクション：標準Pythonの`logging`モジュールを使用。Cloud Functionsは`stdout`/`stderr`と`logging`出力をCloud Loggingに自動的にキャプチャ
-    * アクション：以下のログを追加：関数呼び出し、取得した記事数、成功したアップロード（ファイルIDと共に）、遭遇したエラー（Feedly APIエラー、Drive APIエラー、変換エラー）
+* ✅ **TODO 2.4: 堅牢なログの実装**
+    * ✅ アクション：標準Pythonの`logging`モジュールを使用。Cloud Functionsは`stdout`/`stderr`と`logging`出力をCloud Loggingに自動的にキャプチャ
+    * ✅ アクション：以下のログを追加：関数呼び出し、取得した記事数、成功したアップロード（ファイルIDと共に）、遭遇したエラー（Feedly APIエラー、Drive APIエラー、変換エラー）
+    * ✅ 検証：詳細なログが実装され、デバッグとモニタリングが可能
 
-* **TODO 2.5: デプロイ用requirements.txt生成**
-    * アクション：`poetry export -f requirements.txt --output requirements.txt --without-hashes`を使用してCloud Function用のrequirements.txtを生成
-    * アクション：デプロイ前に必ずこのコマンドを実行
+* ✅ **TODO 2.5: デプロイ用requirements.txt生成**
+    * ✅ アクション：`poetry export -f requirements.txt --output requirements.txt --without-hashes`を使用してCloud Function用のrequirements.txtを生成
+    * ✅ アクション：デプロイ前に必ずこのコマンドを実行
+    * ✅ 検証：生成されたrequirements.txtが正しい依存関係を含む
     * 検証：生成されたrequirements.txtが正しい依存関係を含む
 
-* **TODO 2.6: `main.py`と`pyproject.toml`の最終化**
-    * アクション：すべてのインポートが正しいことを確認
-    * アクション：`pyproject.toml`がGCP環境に必要なすべてのパッケージを含むことを確認（`pathvalidate`、`python-dotenv`含む）
-    * アクション：ファイル名サニタイゼーションが最終コードで使用されることを確認
-    * 検証：コードがクリーンで、よくコメントされ、潜在的な例外を適切に処理する
+* ✅ **TODO 2.6: `main.py`と`pyproject.toml`の最終化**
+    * ✅ アクション：すべてのインポートが正しいことを確認
+    * ✅ アクション：`pyproject.toml`がGCP環境に必要なすべてのパッケージを含むことを確認（`pathvalidate`、`python-dotenv`含む）
+    * ✅ アクション：ファイル名サニタイゼーションが最終コードで使用されることを確認
+    * ✅ 検証：コードがクリーンで、よくコメントされ、潜在的な例外を適切に処理する
 
 ### フェーズ3: デプロイとスケジューリング
 

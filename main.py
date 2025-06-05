@@ -23,10 +23,10 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from pathvalidate import sanitize_filename
 from io import BytesIO
+import google.auth
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from googleapiclient.errors import HttpError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,13 +56,6 @@ def fetch_feedly_articles(api_token: str, stream_id: str, newer_than_timestamp_m
                 break
             
             for item in items:
-                article = {
-                    "id": item.get("id", ""),
-                    "title": item.get("title", ""),
-                    "published": item.get("published", 0),
-                    "engagement": item.get("engagement", 0)
-                }
-                
                 alternate_links = item.get("alternate", [])
                 url = ""
                 for link in alternate_links:
@@ -70,8 +63,13 @@ def fetch_feedly_articles(api_token: str, stream_id: str, newer_than_timestamp_m
                         url = link.get("href", "")
                         break
                 
-                article["alternate"] = url
-                all_articles.append(article)
+                all_articles.append({
+                    "id": item.get("id", ""),
+                    "title": item.get("title", ""),
+                    "published": item.get("published", 0),
+                    "engagement": item.get("engagement", 0),
+                    "alternate": url
+                })
             
             continuation = data.get("continuation")
             if not continuation:
@@ -79,11 +77,8 @@ def fetch_feedly_articles(api_token: str, stream_id: str, newer_than_timestamp_m
         
         return all_articles
         
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Network error while fetching from Feedly API: {e}")
-        return []
     except Exception as e:
-        logger.error(f"Unexpected error while fetching from Feedly API: {e}")
+        logger.error(f"Error while fetching from Feedly API: {e}")
         return []
 
 
@@ -114,6 +109,22 @@ def generate_safe_filename(article: Dict) -> str:
         return f"article_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
 
+def upload_to_google_drive_adc(folder_id: str, file_name: str, json_data_string: str) -> Optional[str]:
+    try:
+        credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/drive.file'])
+        service = build('drive', 'v3', credentials=credentials)
+        
+        file_metadata = {'name': file_name, 'parents': [folder_id]}
+        media_body = MediaIoBaseUpload(BytesIO(json_data_string.encode('utf-8')), mimetype='application/json', resumable=True)
+        
+        file_result = service.files().create(body=file_metadata, media_body=media_body, fields='id').execute()
+        return file_result.get('id')
+        
+    except Exception as e:
+        logger.error(f"Error uploading to Google Drive using ADC: {e}")
+        return None
+
+
 def upload_to_google_drive(service_account_file_path: str, folder_id: str, file_name: str, json_data_string: str) -> Optional[str]:
     try:
         credentials = service_account.Credentials.from_service_account_file(
@@ -132,27 +143,19 @@ def upload_to_google_drive(service_account_file_path: str, folder_id: str, file_
 
 
 def main(request):
-    """
-    Cloud Function entry point for Feedly to Google Drive archiver.
-    Triggered via HTTP request from Cloud Scheduler.
-    """
     try:
         logger.info("Feedly archiver function started")
         
-        # Read environment variables from GCP Cloud Function environment
         feedly_token = os.environ.get("FEEDLY_ACCESS_TOKEN")
         stream_id = os.environ.get("FEEDLY_STREAM_ID") 
         google_drive_folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-        gcp_project_id = os.environ.get("GCP_PROJECT_ID")
         
-        # Parse FETCH_PERIOD_DAYS with error handling
         try:
             fetch_period_days = int(os.environ.get("FETCH_PERIOD_DAYS", "7"))
         except ValueError:
             logger.warning("FETCH_PERIOD_DAYS is not a valid integer, using default value of 7")
             fetch_period_days = 7
         
-        # Validate required environment variables
         if not feedly_token:
             logger.error("FEEDLY_ACCESS_TOKEN environment variable is missing")
             return {"error": "FEEDLY_ACCESS_TOKEN environment variable is missing"}, 400
@@ -162,18 +165,14 @@ def main(request):
         if not google_drive_folder_id:
             logger.error("GOOGLE_DRIVE_FOLDER_ID environment variable is missing")
             return {"error": "GOOGLE_DRIVE_FOLDER_ID environment variable is missing"}, 400
-            
-        # Log configuration (GCP_PROJECT_ID is optional)
-        logger.info(f"Configuration: Stream ID: {stream_id[:20]}..., Folder ID: {google_drive_folder_id}, Period: {fetch_period_days} days")
-        if gcp_project_id:
-            logger.info(f"GCP Project ID: {gcp_project_id}")
         
-        # Calculate newer_than_timestamp_ms based on FETCH_PERIOD_DAYS
+        # Log configuration
+        logger.info(f"Configuration: Stream ID: {stream_id[:20]}..., Folder ID: {google_drive_folder_id}, Period: {fetch_period_days} days")
+        
         older_than_date = datetime.now() - timedelta(days=fetch_period_days)
         newer_than_timestamp_ms = int(older_than_date.timestamp() * 1000)
         logger.info(f"Fetching articles newer than: {older_than_date.isoformat()} (timestamp: {newer_than_timestamp_ms})")
         
-        # Fetch articles from Feedly API
         logger.info("Starting article fetch from Feedly API")
         articles = fetch_feedly_articles(feedly_token, stream_id, newer_than_timestamp_ms)
         
@@ -183,10 +182,11 @@ def main(request):
         
         logger.info(f"Successfully fetched {len(articles)} articles from Feedly")
         
-        # Process and upload articles
         upload_count = 0
         error_count = 0
         processed_files = []
+        
+        logger.info("Starting article processing and upload")
         
         for i, article in enumerate(articles):
             try:
@@ -196,10 +196,7 @@ def main(request):
                 filename = generate_safe_filename(article)
                 json_data = json.dumps(transformed_article, indent=2, ensure_ascii=False)
                 
-                # TODO 2.3 will modify this to use ADC (Application Default Credentials)
-                service_account_file = "/tmp/service-account-key.json"
-                
-                file_id = upload_to_google_drive(service_account_file, google_drive_folder_id, filename, json_data)
+                file_id = upload_to_google_drive_adc(google_drive_folder_id, filename, json_data)
                 
                 if file_id:
                     upload_count += 1
@@ -230,9 +227,8 @@ def main(request):
         }, 200
         
     except Exception as e:
-        error_message = f"Unexpected error in main function: {e}"
-        logger.error(error_message, exc_info=True)
-        return {"error": error_message}, 500
+        logger.error(f"Unexpected error in main function: {e}")
+        return {"error": f"Unexpected error in main function: {e}"}, 500
 
 
 if __name__ == "__main__":
