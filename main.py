@@ -13,6 +13,13 @@ import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from pathvalidate import sanitize_filename
+from io import BytesIO
+
+# Google Drive API imports
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.errors import HttpError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -186,6 +193,76 @@ def generate_safe_filename(article: Dict) -> str:
         return f"article_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
 
+def upload_to_google_drive(service_account_file_path: str, folder_id: str, file_name: str, json_data_string: str) -> Optional[str]:
+    """
+    Upload a JSON file to Google Drive using service account credentials.
+    
+    Args:
+        service_account_file_path: Path to the service account JSON key file
+        folder_id: Google Drive folder ID where the file will be uploaded
+        file_name: Name of the file to be created
+        json_data_string: JSON data as a string to be uploaded
+        
+    Returns:
+        File ID of the uploaded file if successful, None otherwise
+    """
+    try:
+        # Create credentials from service account file
+        logger.info(f"Loading service account credentials from: {service_account_file_path}")
+        credentials = service_account.Credentials.from_service_account_file(
+            service_account_file_path,
+            scopes=['https://www.googleapis.com/auth/drive.file']
+        )
+        
+        # Build the Drive API service
+        service = build('drive', 'v3', credentials=credentials)
+        
+        # Create file metadata
+        file_metadata = {
+            'name': file_name,
+            'parents': [folder_id]
+        }
+        
+        # Create media body from JSON data
+        json_bytes = json_data_string.encode('utf-8')
+        media_body = MediaIoBaseUpload(
+            BytesIO(json_bytes),
+            mimetype='application/json',
+            resumable=True
+        )
+        
+        logger.info(f"Uploading file: {file_name} to folder: {folder_id}")
+        
+        # Upload the file
+        file_result = service.files().create(
+            body=file_metadata,
+            media_body=media_body,
+            fields='id,name,parents'
+        ).execute()
+        
+        file_id = file_result.get('id')
+        logger.info(f"Successfully uploaded file: {file_name} with ID: {file_id}")
+        
+        return file_id
+        
+    except FileNotFoundError:
+        logger.error(f"Service account file not found: {service_account_file_path}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid service account file format: {e}")
+        return None
+    except HttpError as e:
+        logger.error(f"Google Drive API error: {e}")
+        if e.resp.status == 403:
+            logger.error("Permission denied. Check if the service account has access to the folder.")
+        elif e.resp.status == 404:
+            logger.error("Folder not found. Check if the folder ID is correct.")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error uploading to Google Drive: {e}")
+        return None
+
+
 if __name__ == "__main__":
     # This section is for local testing
     from dotenv import load_dotenv
@@ -197,10 +274,18 @@ if __name__ == "__main__":
     feedly_token = os.getenv("FEEDLY_ACCESS_TOKEN")
     stream_id = os.getenv("FEEDLY_STREAM_ID")
     fetch_period_days = int(os.getenv("FETCH_PERIOD_DAYS", 7))
+    google_drive_folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+    service_account_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
     
     if not feedly_token or not stream_id:
         logger.error("Required environment variables are missing. Please check your .env file.")
         exit(1)
+    
+    if not google_drive_folder_id:
+        logger.warning("GOOGLE_DRIVE_FOLDER_ID not set. Files will not be uploaded to Google Drive.")
+    
+    if not service_account_file:
+        logger.warning("GOOGLE_SERVICE_ACCOUNT_FILE not set. Files will not be uploaded to Google Drive.")
     
     # Calculate timestamp for filtering (fetch articles from the last N days)
     now = datetime.now()
@@ -215,6 +300,9 @@ if __name__ == "__main__":
     if articles:
         logger.info(f"Processing {len(articles)} articles...")
         
+        upload_count = 0
+        error_count = 0
+        
         for article in articles:
             # Transform article data
             transformed_article = transform_to_json_structure(article)
@@ -225,10 +313,40 @@ if __name__ == "__main__":
             # Convert to JSON string
             json_data = json.dumps(transformed_article, indent=2, ensure_ascii=False)
             
-            logger.info(f"Processed article: {filename}")
-            logger.info(f"Title: {transformed_article['title']}")
+            logger.info(f"Processing article: {filename}")
+            logger.info(f"Title: {transformed_article['title'][:100]}{'...' if len(transformed_article['title']) > 100 else ''}")
             logger.info(f"URL: {transformed_article['url']}")
             logger.info(f"Published: {transformed_article['publishedDate']}")
+            
+            # Upload to Google Drive if credentials are available
+            if google_drive_folder_id and service_account_file:
+                file_id = upload_to_google_drive(
+                    service_account_file,
+                    google_drive_folder_id,
+                    filename,
+                    json_data
+                )
+                
+                if file_id:
+                    upload_count += 1
+                    logger.info(f"✅ Successfully uploaded to Google Drive with ID: {file_id}")
+                else:
+                    error_count += 1
+                    logger.error(f"❌ Failed to upload to Google Drive")
+            else:
+                logger.info("🔄 Skipping Google Drive upload (credentials not configured)")
+                
             logger.info("---")
+        
+        # Summary
+        logger.info("=" * 50)
+        logger.info("PROCESSING SUMMARY:")
+        logger.info(f"Total articles processed: {len(articles)}")
+        if google_drive_folder_id and service_account_file:
+            logger.info(f"Successfully uploaded: {upload_count}")
+            logger.info(f"Upload errors: {error_count}")
+        else:
+            logger.info("Google Drive upload skipped (credentials not configured)")
+        logger.info("=" * 50)
     else:
         logger.warning("No articles were fetched.")

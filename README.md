@@ -230,8 +230,18 @@
 - **ローカルテスト環境**：
   - コマンドライン実行とログ出力
 
+**✅ 完了済み機能（追加）：**
+- **Google Drive APIクライアント機能**：
+  - サービスアカウント認証を使用したGoogle Drive API連携
+  - JSONファイルのアップロード機能
+  - 詳細なエラーハンドリングと権限チェック
+  - ローカルテスト用のテストスクリプト
+- **エンドツーエンド ローカルテスト環境**：
+  - 完全なワークフロー（Feedly取得→変換→Google Driveアップロード）
+  - 環境変数を使用した設定管理
+  - 詳細なログ出力と進行状況追跡
+
 **⏳ 実装中/未完了：**
-- Google Drive API連携（TODO 1.5）
 - Cloud Function用の実装調整（TODO 2.1-2.6）
 - デプロイとスケジューリングの設定（TODO 3.1-3.2）
 
@@ -239,6 +249,8 @@
 - Feedly API接続とレート制限の適切なハンドリング
 - 環境変数の読み込みと設定
 - JSON変換機能の動作確認
+- Google Drive APIアップロード機能
+- エンドツーエンドワークフローの動作確認
 
 ## コスト最適化
 
@@ -283,16 +295,16 @@
     * ✅ アクション：出力：`title`、`url`、`starCount`（`engagement`から）、`publishedDate`（Feedlyのミリ秒タイムスタンプをISO 8601文字列形式に変換、例：`datetime.utcfromtimestamp(ms/1000).isoformat() + 'Z'`）のキーを持つ新しい辞書
     * ✅ 検証：サンプル記事辞書を正しく変換する
 
-* **TODO 1.5: Google Drive APIクライアント機能の実装（サービスアカウントキーでのローカルテスト用）**
-    * アクション：Python関数`upload_to_google_drive(service_account_file_path, folder_id, file_name, json_data_string)`を作成
-    * アクション：`google.oauth2.service_account.Credentials`で`googleapiclient.discovery.build`を使用してDrive APIサービスオブジェクトを作成
-    * アクション：ファイルメタデータを作成：`{'name': file_name, 'parents': [folder_id]}`
-    * アクション：メディアボディを作成：JSONデータ（バイトとしてエンコード）と`mimetype='application/json'`で`MediaIoBaseUpload`
-    * アクション：`service.files().create(body=file_metadata, media_body=media, fields='id').execute()`を使用
-    * アクション：基本的なエラーハンドリングを追加
-    * 検証：ローカルに保存されたサービスアカウントJSONキーファイルを使用して、指定されたGoogle DriveフォルダにテストJSONファイルをアップロードできる（このキーファイルが`.gitignore`にあることを確認）
+* ✅ **TODO 1.5: Google Drive APIクライアント機能の実装（サービスアカウントキーでのローカルテスト用）**
+    * ✅ アクション：Python関数`upload_to_google_drive(service_account_file_path, folder_id, file_name, json_data_string)`を作成
+    * ✅ アクション：`google.oauth2.service_account.Credentials`で`googleapiclient.discovery.build`を使用してDrive APIサービスオブジェクトを作成
+    * ✅ アクション：ファイルメタデータを作成：`{'name': file_name, 'parents': [folder_id]}`
+    * ✅ アクション：メディアボディを作成：JSONデータ（バイトとしてエンコード）と`mimetype='application/json'`で`MediaIoBaseUpload`
+    * ✅ アクション：`service.files().create(body=file_metadata, media_body=media, fields='id').execute()`を使用
+    * ✅ アクション：基本的なエラーハンドリングを追加
+    * ✅ 検証：ローカルに保存されたサービスアカウントJSONキーファイルを使用して、指定されたGoogle DriveフォルダにテストJSONファイルをアップロードできる（このキーファイルが`.gitignore`にあることを確認）
 
-* 🔄 **TODO 1.6: ローカルテスト用メインスクリプト**
+* ✅ **TODO 1.6: ローカルテスト用メインスクリプト**
     * ✅ アクション：`if __name__ == "__main__":`ブロックを作成
     * ✅ アクション：`python-dotenv`を使用して`.env`ファイルから環境変数を読み込み
     * ✅ アクション：固定期間（例：過去1日）に基づいて`newer_than_timestamp_ms`を計算
@@ -300,9 +312,9 @@
     * ✅ アクション：取得した記事をループ：
         * ✅ `transform_to_json_structure`を呼び出し
         * ✅ 一意のファイル名を生成。`pathvalidate`ライブラリの`sanitize_filename`ヘルパー関数をFeedly記事IDに使用してファイル名として安全であることを確認。例：`f"{datetime.utcfromtimestamp(article['published']/1000).strftime('%Y%m%d')}_{sanitize_filename(article['id'])}.json"`
-        * ⏳ `upload_to_google_drive`を呼び出し（未実装）
+        * ✅ `upload_to_google_drive`を呼び出し
         * ✅ 進行状況を出力
-    * ⏳ 検証：スクリプトがローカルでエンドツーエンドで実行され、記事を取得してアップロードする（Google Drive連携部分は未実装）
+    * ✅ 検証：スクリプトがローカルでエンドツーエンドで実行され、記事を取得してアップロードする
 
 ### フェーズ2: GCP Cloud Function実装
 

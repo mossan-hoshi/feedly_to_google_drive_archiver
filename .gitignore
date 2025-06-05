@@ -3,6 +3,19 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Environment variables and secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Google Service Account keys (DO NOT COMMIT)
+service-account-key.json
+*-service-account-key.json
+*.json
+!pyproject.toml
+
 # C extensions
 *.so
 
