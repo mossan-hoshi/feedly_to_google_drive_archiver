@@ -122,10 +122,12 @@
 
 | 列名 | 説明 | 例 |
 |------|------|-----|
-| `title` | 記事タイトル（カンマ・改行除去済み） | "最新技術動向について" |
-| `url` | 記事のURL | "https://example.com/article" |
 | `starCount` | Feedlyエンゲージメントスコア | 42 |
+| `title` | 記事タイトル（カンマ・改行除去済み） | "最新技術動向について" |
 | `publishedDate` | 公開日時（ISO8601形式） | "2025-06-07T10:30:00Z" |
+| `url` | 記事のURL | "https://example.com/article" |
+
+**注意**: 記事は`starCount`（エンゲージメントスコア）の降順でソートされます（高い順から低い順）。
 
 #### ファイル名規則
 - 形式：`feedly_articles_YYYYMMDD_HHMMSS.txt`
@@ -270,7 +272,7 @@ gcloud scheduler jobs create http feedly-archive-job \
 ✅ **結果の確認**  
 - Google Driveの指定フォルダにCSVファイル（拡張子.txt）が作成される
 - ファイル名形式：`feedly_articles_YYYYMMDD_HHMMSS.txt`
-- CSV形式（ヘッダー付き）：`title,url,starCount,publishedDate`
+- CSV形式（ヘッダー付き）：`starCount,title,publishedDate,url`
 
 ### 手動実行とテスト
 

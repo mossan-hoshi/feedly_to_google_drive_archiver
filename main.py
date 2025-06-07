@@ -117,14 +117,17 @@ def generate_csv_content(articles: List[Dict]) -> str:
     """Generate CSV content from articles list"""
     try:
         output = StringIO()
-        fieldnames = ["title", "url", "starCount", "publishedDate"]
+        fieldnames = ["starCount", "title", "publishedDate", "url"]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
+        
+        # Sort articles by starCount in descending order (high to low)
+        sorted_articles = sorted(articles, key=lambda x: x.get('starCount', 0), reverse=True)
         
         # Write header
         writer.writeheader()
         
-        # Write articles
-        for article in articles:
+        # Write sorted articles
+        for article in sorted_articles:
             writer.writerow(article)
         
         csv_content = output.getvalue()
