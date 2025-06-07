@@ -4,7 +4,7 @@
 
 ## プロジェクト概要
 
-このプロジェクトは、指定された期間のFeedlyアカウントから記事を自動的に取得し、Google Driveの指定されたフォルダに個別のJSONファイルとして保存するサーバーレスソリューションを提供します。無料枠を活用してコストを最小限に抑えることに重点を置き、Google Cloud Platform（GCP）でのホスティング用に設計されています。
+このプロジェクトは、指定された期間のFeedlyアカウントから記事を自動的に取得し、Google Driveの指定されたフォルダにCSV形式（拡張子.txt）のファイルとして保存するサーバーレスソリューションを提供します。無料枠を活用してコストを最小限に抑えることに重点を置き、Google Cloud Platform（GCP）でのホスティング用に設計されています。
 
 主要コンポーネントには、Cloud SchedulerによってトリガーされるGoogle Cloud Function（Python）、環境変数・認証情報管理用のdotenv、Feedly APIとGoogle Drive APIとの連携が含まれます。
 
@@ -30,7 +30,8 @@
 
 * 指定されたFeedlyストリームから記事（タイトル、URL、エンゲージメントスコア、公開日）を取得
 * 定義された期間（例：過去N日間）での記事フィルタリング
-* 各記事を構造化されたJSONファイルとして特定のGoogle Driveフォルダに保存
+* 記事タイトル内のカンマや改行文字の自動クリーニング処理
+* 複数記事をバッチ処理してCSV形式（拡張子.txt）で特定のGoogle Driveフォルダに保存
 * Cloud Schedulerを使用した自動化と定期実行
 * dotenvファイルを使用したAPIキーと設定の安全な管理
 * 一般的な個人使用におけるGCP無料枠内での低コスト/無コスト運用を目指した設計
@@ -58,7 +59,7 @@
         * Feedlyアカウントでログイン
         * ページに表示される「User ID」をコピー（通常は`c805fcbf-3acf-4302-a97e-d82f9d7c897f`のような形式）
     * **Google Drive：**
-    * JSONファイルが保存されるGoogle Driveフォルダ。その**フォルダID**が必要です
+    * CSVファイルが保存されるGoogle Driveフォルダ。その**フォルダID**が必要です
         * Google Driveでフォルダを開きます。URLは`https://drive.google.com/drive/folders/THIS_IS_THE_FOLDER_ID`のようになります。ID部分をコピーしてください
 3.  **開発ツール（オプション、ローカルテスト用）：**
     * Python 3.8+
@@ -104,14 +105,37 @@
    - レート制限とエラーハンドリング
 
 2. **データ変換**
-   - Feedly形式からカスタムJSON形式への変換
+   - Feedly形式からCSV形式への変換
+   - 記事タイトルのクリーニング（カンマ、改行文字の除去）
    - ファイル名の安全化処理
    - 日付形式の正規化
 
 3. **Google Drive統合**
    - 環境に応じた認証方式の自動切り替え
-   - 構造化されたJSONファイルのアップロード
+   - バッチ処理されたCSVファイル（拡張子.txt）のアップロード
    - エラーハンドリングとログ出力
+
+### 出力形式の詳細
+
+#### CSV構造
+出力されるCSVファイルには以下の列が含まれます：
+
+| 列名 | 説明 | 例 |
+|------|------|-----|
+| `title` | 記事タイトル（カンマ・改行除去済み） | "最新技術動向について" |
+| `url` | 記事のURL | "https://example.com/article" |
+| `starCount` | Feedlyエンゲージメントスコア | 42 |
+| `publishedDate` | 公開日時（ISO8601形式） | "2025-06-07T10:30:00Z" |
+
+#### ファイル名規則
+- 形式：`feedly_articles_YYYYMMDD_HHMMSS.txt`
+- 例：`feedly_articles_20250607_103000.txt`
+- 拡張子：`.txt`（内容はCSV形式）
+
+#### データクリーニング
+- **タイトル処理**：カンマ（`,`）と改行文字（`\n`, `\r`）を自動除去
+- **スペース正規化**：連続するスペースを単一スペースに統合
+- **日付形式**：UTC基準のISO8601形式で統一
 
 ## セットアップ手順
 
@@ -241,11 +265,12 @@ gcloud scheduler jobs create http feedly-archive-job \
 
 ✅ **自動スケジュール実行**  
 - Cloud Schedulerが設定されたスケジュール（デフォルト：毎日午前3時）で自動実行
-- Feedlyから新しい記事を取得してGoogle Driveに保存
+- Feedlyから新しい記事を取得してCSV形式でGoogle Driveに保存
 
 ✅ **結果の確認**  
-- Google Driveの指定フォルダにJSONファイルが作成される
-- ファイル名形式：`YYYYMMDD_記事ID.json`
+- Google Driveの指定フォルダにCSVファイル（拡張子.txt）が作成される
+- ファイル名形式：`feedly_articles_YYYYMMDD_HHMMSS.txt`
+- CSV形式（ヘッダー付き）：`title,url,starCount,publishedDate`
 
 ### 手動実行とテスト
 
@@ -332,155 +357,3 @@ gcloud scheduler jobs pause feedly-archive-job --location=us-central1
 # 関数を削除（完全停止）
 gcloud functions delete feedly-to-drive-archiver --region=us-central1
 ```
-
-## コスト最適化
-
-このシステムは非常にコスト効率的になるよう設計されています：
-
-* **Cloud Functions（第2世代）：** 呼び出し、vCPU時間、メモリ時間に対して寛大な永続無料枠があります。このスクリプトの日次実行は簡単にその範囲内に収まるはずです
-* **Cloud Scheduler：** 請求アカウントあたり月3つの無料ジョブを提供します。この単一ジョブは無料になります
-* **Google Drive API：** この使用量レベルでは呼び出しは一般的に無料です。Google Driveストレージコストは個人/Workspaceプランに基づいて適用されます
-* **Feedly API：** スクリプトは基本的なレート制限を尊重します。使用量がFeedlyの一般的なAPI制限（月間100,000リクエスト）内に留まることを確認してください
-
-## 開発TODOリスト（GitHub Copilot用）
-
-このリストは開発手順の概要を示します。GitHub Copilotは各タスクのコード生成を支援できます。
-
-### フェーズ1：コアロジックとローカルテスト
-
-* ✅ **TODO 1.1: Poetry仮想環境のセットアップと依存関係のインストール**
-    * アクション：`pyproject.toml`を作成し、必要な依存関係を定義
-    * アクション：`poetry install`で仮想環境を作成し、依存関係をインストール
-    * 検証：依存関係が正しくインストールされる
-
-* ✅ **TODO 1.2: 環境変数管理のセットアップ**
-    * アクション：`.env`ファイルを作成し、必要な環境変数を設定
-    * アクション：`python-dotenv`を使用して環境変数を読み込む関数を実装
-    * アクション：`.env`ファイルを`.gitignore`に追加
-    * 検証：環境変数が正しく読み込まれる
-
-* ✅ **TODO 1.3: Feedly APIクライアント機能の実装**
-    * ✅ アクション：Python関数`fetch_feedly_articles(api_token, stream_id, newer_than_timestamp_ms)`を作成
-    * ✅ アクション：この関数内でFeedly API URL（`https://cloud.feedly.com/v3/streams/contents`）を構築
-    * ✅ アクション：`Authorization: Bearer <api_token>`ヘッダーを設定
-    * ✅ アクション：Feedly APIレスポンスからの`continuation`パラメータを使用してページネーションを処理するロジックを実装。`continuation` IDが提供されなくなるまでループ
-    * ✅ アクション：APIリクエストに`count`（例：100）と`newerThan`パラメータを含める
-    * ✅ アクション：各アイテムから`id`、`title`、`alternate`（`text/html`タイプのURLを取得）、`published`（タイムスタンプ）、`engagement`を抽出
-    * ✅ アクション：抽出されたフィールドを持つ記事を表す辞書のリストを返す
-    * ✅ アクション：HTTPリクエスト失敗に対する基本的なエラーハンドリングを追加（例：エラーを出力、空のリストを返す）
-    * ✅ 検証：パブリックフィードまたはテストカテゴリからいくつかの記事を取得できる（ローカルテストには有効なトークンとストリームIDが必要）
-
-* ✅ **TODO 1.4: JSON変換機能の実装**
-    * ✅ アクション：Python関数`transform_to_json_structure(article_data)`を作成
-    * ✅ アクション：入力：`fetch_feedly_articles`からの辞書
-    * ✅ アクション：出力：`title`、`url`、`starCount`（`engagement`から）、`publishedDate`（Feedlyのミリ秒タイムスタンプをISO 8601文字列形式に変換、例：`datetime.utcfromtimestamp(ms/1000).isoformat() + 'Z'`）のキーを持つ新しい辞書
-    * ✅ 検証：サンプル記事辞書を正しく変換する
-
-* ✅ **TODO 1.5: Google Drive APIクライアント機能の実装（サービスアカウントキーでのローカルテスト用）**
-    * ✅ アクション：Python関数`upload_to_google_drive(service_account_file_path, folder_id, file_name, json_data_string)`を作成
-    * ✅ アクション：`google.oauth2.service_account.Credentials`で`googleapiclient.discovery.build`を使用してDrive APIサービスオブジェクトを作成
-    * ✅ アクション：ファイルメタデータを作成：`{'name': file_name, 'parents': [folder_id]}`
-    * ✅ アクション：メディアボディを作成：JSONデータ（バイトとしてエンコード）と`mimetype='application/json'`で`MediaIoBaseUpload`
-    * ✅ アクション：`service.files().create(body=file_metadata, media_body=media, fields='id').execute()`を使用
-    * ✅ アクション：基本的なエラーハンドリングを追加
-    * ✅ 検証：ローカルに保存されたサービスアカウントJSONキーファイルを使用して、指定されたGoogle DriveフォルダにテストJSONファイルをアップロードできる（このキーファイルが`.gitignore`にあることを確認）
-
-* ✅ **TODO 1.6: ローカルテスト用メインスクリプト**
-    * ✅ アクション：`if __name__ == "__main__":`ブロックを作成
-    * ✅ アクション：`python-dotenv`を使用して`.env`ファイルから環境変数を読み込み
-    * ✅ アクション：固定期間（例：過去1日）に基づいて`newer_than_timestamp_ms`を計算
-    * ✅ アクション：`fetch_feedly_articles`を呼び出し
-    * ✅ アクション：取得した記事をループ：
-        * ✅ `transform_to_json_structure`を呼び出し
-        * ✅ 一意のファイル名を生成。`pathvalidate`ライブラリの`sanitize_filename`ヘルパー関数をFeedly記事IDに使用してファイル名として安全であることを確認。例：`f"{datetime.utcfromtimestamp(article['published']/1000).strftime('%Y%m%d')}_{sanitize_filename(article['id'])}.json"`
-        * ✅ `upload_to_google_drive`を呼び出し
-        * ✅ 進行状況を出力
-    * ✅ 検証：スクリプトがローカルでエンドツーエンドで実行され、記事を取得してアップロードする
-
-### フェーズ2: GCP Cloud Function実装
-
-* ✅**TODO 2.1: Cloud Functionエントリーポイント用に適応（`main.py`）**
-    * ✅アクション：HTTPトリガー用のCloud Functionエントリーポイント`def main(request):`を作成
-    * ✅アクション：ローカルテストスクリプトからコアロジックをこの関数に移動
-
-* ✅ **TODO 2.2: 環境変数の取得（dotenv不使用、GCP環境変数使用）**
-    * ✅ アクション：`main`で、環境変数（`os.environ.get()`）から`FEEDLY_ACCESS_TOKEN`、`GOOGLE_DRIVE_FOLDER_ID`、`FEEDLY_STREAM_ID`、`FETCH_PERIOD_DAYS`、`GCP_PROJECT_ID`を読み取り
-    * ✅ アクション：`FETCH_PERIOD_DAYS`に基づいて`newer_than_timestamp_ms`を計算
-
-* ✅ **TODO 2.3: Cloud Function用にGoogle Driveアップロードを適応（ADC）**
-    * ✅ アクション：Cloud Functionsで実行時にApplication Default Credentials（ADC）を使用する新しい関数`upload_to_google_drive_adc()`を作成。`google.auth.default()`が認証情報を提供
-    * ✅ アクション：既存の`upload_to_google_drive()`関数は本テスト用に保持し、Cloud Function用とローカルテスト用の両方をサポート
-    * ✅ アクション：Cloud Functionの`main()`関数でADC関数を使用するよう変更
-    * ✅ 検証：ADCを使用してGoogle Driveにアクセスする実装が完了
-
-* ✅ **TODO 2.4: 堅牢なログの実装**
-    * ✅ アクション：標準Pythonの`logging`モジュールを使用。Cloud Functionsは`stdout`/`stderr`と`logging`出力をCloud Loggingに自動的にキャプチャ
-    * ✅ アクション：以下のログを追加：関数呼び出し、取得した記事数、成功したアップロード（ファイルIDと共に）、遭遇したエラー（Feedly APIエラー、Drive APIエラー、変換エラー）
-    * ✅ 検証：詳細なログが実装され、デバッグとモニタリングが可能
-
-* ✅ **TODO 2.5: デプロイ用requirements.txt生成**
-    * ✅ アクション：`poetry export -f requirements.txt --output requirements.txt --without-hashes`を使用してCloud Function用のrequirements.txtを生成
-    * ✅ アクション：デプロイ前に必ずこのコマンドを実行
-    * ✅ 検証：生成されたrequirements.txtが正しい依存関係を含む
-    * 検証：生成されたrequirements.txtが正しい依存関係を含む
-
-* ✅ **TODO 2.6: `main.py`と`pyproject.toml`の最終化**
-    * ✅ アクション：すべてのインポートが正しいことを確認
-    * ✅ アクション：`pyproject.toml`がGCP環境に必要なすべてのパッケージを含むことを確認（`pathvalidate`、`python-dotenv`含む）
-    * ✅ アクション：ファイル名サニタイゼーションが最終コードで使用されることを確認
-    * ✅ 検証：コードがクリーンで、よくコメントされ、潜在的な例外を適切に処理する
-
-### フェーズ3: デプロイとスケジューリング
-
-* ✅ **TODO 3.1: デプロイスクリプト/コマンドの作成（セットアップ手順として）**
-    * ✅ アクション：必要なすべてのフラグと環境変数を含む`gcloud functions deploy`コマンドをREADMEに文書化
-    * ✅ アクション：デプロイ前の`poetry export`コマンドを含める
-    * ✅ アクション：自動化デプロイスクリプト`deploy.sh`を作成
-    * ✅ アクション：対話形式で環境変数を安全に入力できる仕組みを実装
-    * ✅ 検証：コマンドが正確で、ユーザー固有の値のプレースホルダーを含む
-
-* ✅ **TODO 3.2: Cloud Schedulerセットアップスクリプト/コマンドの作成（セットアップ手順として）**
-    * ✅ アクション：`gcloud scheduler jobs create http`コマンドをREADMEに文書化
-    * ✅ アクション：自動化スケジューラースクリプト`scheduler.sh`を作成
-    * ✅ アクション：スケジュール、タイムゾーン、リージョンをカスタマイズできる機能を実装
-    * ✅ アクション：既存ジョブの検出と更新機能を追加
-    * ✅ アクション：手動テスト実行オプションを追加
-    * ✅ 検証：コマンドが正確で、関数URLの取得方法を含む
-
-* ✅ **TODO 3.3: 管理ユーティリティとドキュメントの作成**
-    * ✅ アクション：システム管理用のスクリプト`manage.sh`を作成
-    * ✅ アクション：状態確認、ログ表示、手動実行、設定変更機能を実装
-    * ✅ アクション：詳細デプロイメントガイド`DEPLOYMENT.md`を作成
-    * ✅ アクション：クイックスタートガイド`QUICKSTART.md`を作成
-    * ✅ アクション：トラブルシューティングセクションを追加
-    * ✅ 検証：包括的な管理ツールとドキュメントが完成
-
-### フェーズ4: テストと改良
-
-* **TODO 4.1: デプロイされたCloud Functionの手動テスト**
-    * アクション：デプロイ後、GCPコンソールまたは`gcloud functions call`経由でCloud Functionを手動でトリガー
-    * 検証：出力とエラーについてCloud Loggingを確認。Google Driveでファイルが作成されることを確認
-
-* **TODO 4.2: Cloud Schedulerトリガーのテスト**
-    * アクション：テスト用にCloud Schedulerジョブを近い将来の時間に設定するか、スケジュールされた実行を待つ
-    * 検証：関数がスケジューラによってトリガーされ、実行が成功する。ログを確認
-
-* **TODO 4.3: コスト最適化ポイントの確認**
-    * アクション：関数のメモリ設定、実行時間を二重チェック
-    * アクション：不要なAPI呼び出しが行われていないことを確認
-    * 検証：ソリューションが最小コストの目標に沿っている
-
-* **TODO 4.4: 詳細なエラーハンドリングとリトライの追加**
-    * アクション：429（Too Many Requests）、500、502、503、504などのHTTPステータスコードに対して指数バックオフとジッターを伴うリトライを実装。これには`tenacity`などのライブラリの使用を検討
-    * 検証：FeedlyとGoogle Drive APIの両方の呼び出しで特定のHTTPエラーコードに対してリトライが試行される
-
-## 潜在的な問題とトラブルシューティング
-
-* **Feedly APIトークンの期限切れ：** 開発者トークンは期限切れになる可能性があります。スクリプトが動作しなくなった場合、トークンの更新が必要かどうかを確認し、`.env`ファイルまたはCloud Function環境変数で更新してください。より永続的なソリューションには、リフレッシュトークンを使用した完全なOAuth 2.0フローの実装が必要です（より複雑）
-* **環境変数の設定ミス：** ローカル開発では`.env`ファイル、Cloud Functionでは環境変数として設定されていることを確認してください。設定の不一致がエラーの原因となることがあります
-* **Poetry依存関係の問題：** 新しい依存関係を追加した後は、`poetry export`でrequirements.txtを再生成してからCloud Functionを再デプロイしてください
-* **Feedly APIレート制限：** スクリプトは低ボリューム用に設計されていますが、広範囲な履歴取得や非常に頻繁な実行はレート制限に達する可能性があります。スクリプトは理想的にはリトライでこれを処理すべきです。デバッグが必要な場合は、Feedlyの`X-RateLimit-Count`と`X-RateLimit-Reset`ヘッダーのドキュメントを確認してください
-* **Google Drive API権限：** サービスアカウントが対象フォルダに「編集者」アクセス権を持っていることを確認してください。権限エラーでアップロードが失敗する場合は、共有設定を再確認してください
-* **Cloud Functionタイムアウト：** 非常に多数の記事を取得する場合、関数がタイムアウトする可能性があります（デフォルトは60秒、第2世代の最大は3600秒）。必要に応じてタイムアウト設定を調整するか、より小さなチャンクで処理するロジックを実装してください
-* **Feedly APIの変更：** APIは変更される可能性があります。将来スクリプトが壊れた場合は、エンドポイントやデータ構造の更新についてFeedly開発者ドキュメントを確認してください
-* **ファイル名の安全性：** Feedly項目IDには、ファイル名として安全でない文字（例：`/`、`+`）が含まれる可能性があります。この実装では`pathvalidate`ライブラリを使用してファイル名をサニタイズします。このライブラリが使用されない場合、ファイル作成が失敗する可能性があります

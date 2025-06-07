@@ -17,11 +17,12 @@ Local Testing Additional Variables:
 
 import os
 import json
+import csv
 import logging
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-from io import BytesIO
+from io import BytesIO, StringIO
 import google.auth
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -81,13 +82,28 @@ def fetch_feedly_articles(api_token: str, stream_id: str, newer_than_timestamp_m
         return []
 
 
-def transform_to_json_structure(article_data: Dict) -> Dict:
+def clean_title(title: str) -> str:
+    """Clean article title by removing commas and newlines"""
+    try:
+        if not title:
+            return ""
+        # Remove commas, newlines, and carriage returns
+        cleaned = title.replace(',', '').replace('\n', ' ').replace('\r', ' ')
+        # Replace multiple spaces with single space
+        cleaned = ' '.join(cleaned.split())
+        return cleaned
+    except Exception as e:
+        logger.error(f"Error cleaning title: {e}")
+        return ""
+
+
+def transform_to_csv_structure(article_data: Dict) -> Dict:
     try:
         published_timestamp = article_data.get("published", 0)
         published_date = datetime.utcfromtimestamp(published_timestamp / 1000).isoformat() + 'Z' if published_timestamp else ""
         
         return {
-            "title": article_data.get("title", ""),
+            "title": clean_title(article_data.get("title", "")),
             "url": article_data.get("alternate", ""),
             "starCount": article_data.get("engagement", 0),
             "publishedDate": published_date
@@ -97,23 +113,45 @@ def transform_to_json_structure(article_data: Dict) -> Dict:
         return {"title": "", "url": "", "starCount": 0, "publishedDate": ""}
 
 
+def generate_csv_content(articles: List[Dict]) -> str:
+    """Generate CSV content from articles list"""
+    try:
+        output = StringIO()
+        fieldnames = ["title", "url", "starCount", "publishedDate"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        
+        # Write header
+        writer.writeheader()
+        
+        # Write articles
+        for article in articles:
+            writer.writerow(article)
+        
+        csv_content = output.getvalue()
+        output.close()
+        return csv_content
+    except Exception as e:
+        logger.error(f"Error generating CSV content: {e}")
+        return ""
+
+
 def generate_batch_filename() -> str:
     """Generate filename for batch of articles"""
     try:
         current_time = datetime.now()
-        return f"feedly_articles_{current_time.strftime('%Y%m%d_%H%M%S')}.json"
+        return f"feedly_articles_{current_time.strftime('%Y%m%d_%H%M%S')}.txt"
     except Exception as e:
         logger.error(f"Error generating filename: {e}")
-        return f"feedly_articles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        return f"feedly_articles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
 
-def upload_to_google_drive_adc(folder_id: str, file_name: str, json_data_string: str) -> Optional[str]:
+def upload_to_google_drive_adc(folder_id: str, file_name: str, csv_data_string: str) -> Optional[str]:
     try:
         credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/drive.file'])
         service = build('drive', 'v3', credentials=credentials)
         
         file_metadata = {'name': file_name, 'parents': [folder_id]}
-        media_body = MediaIoBaseUpload(BytesIO(json_data_string.encode('utf-8')), mimetype='application/json', resumable=True)
+        media_body = MediaIoBaseUpload(BytesIO(csv_data_string.encode('utf-8')), mimetype='text/plain', resumable=True)
         
         file_result = service.files().create(body=file_metadata, media_body=media_body, fields='id').execute()
         return file_result.get('id')
@@ -123,14 +161,14 @@ def upload_to_google_drive_adc(folder_id: str, file_name: str, json_data_string:
         return None
 
 
-def upload_to_google_drive(service_account_file_path: str, folder_id: str, file_name: str, json_data_string: str) -> Optional[str]:
+def upload_to_google_drive(service_account_file_path: str, folder_id: str, file_name: str, csv_data_string: str) -> Optional[str]:
     try:
         credentials = service_account.Credentials.from_service_account_file(
             service_account_file_path, scopes=['https://www.googleapis.com/auth/drive.file'])
         service = build('drive', 'v3', credentials=credentials)
         
         file_metadata = {'name': file_name, 'parents': [folder_id]}
-        media_body = MediaIoBaseUpload(BytesIO(json_data_string.encode('utf-8')), mimetype='application/json', resumable=True)
+        media_body = MediaIoBaseUpload(BytesIO(csv_data_string.encode('utf-8')), mimetype='text/plain', resumable=True)
         
         file_result = service.files().create(body=file_metadata, media_body=media_body, fields='id').execute()
         return file_result.get('id')
@@ -180,11 +218,11 @@ def main(request):
         
         logger.info(f"Successfully fetched {len(articles)} articles from Feedly")
         
-        # Transform all articles to JSON structure
+        # Transform all articles to CSV structure
         transformed_articles = []
         for article in articles:
             try:
-                transformed_article = transform_to_json_structure(article)
+                transformed_article = transform_to_csv_structure(article)
                 transformed_articles.append(transformed_article)
             except Exception as e:
                 logger.error(f"Error transforming article {article.get('id', 'unknown')}: {e}")
@@ -193,19 +231,13 @@ def main(request):
             logger.warning("No articles were successfully transformed")
             return {"message": "No articles were successfully transformed", "articles_processed": 0}, 200
         
-        # Create batch JSON data
-        batch_data = {
-            "fetch_date": datetime.now().isoformat() + 'Z',
-            "total_articles": len(transformed_articles),
-            "articles": transformed_articles
-        }
-        
+        # Create CSV data
         filename = generate_batch_filename()
-        json_data = json.dumps(batch_data, indent=2, ensure_ascii=False)
+        csv_data = generate_csv_content(transformed_articles)
         
         logger.info(f"Starting upload of batch file: {filename}")
         
-        file_id = upload_to_google_drive_adc(google_drive_folder_id, filename, json_data)
+        file_id = upload_to_google_drive_adc(google_drive_folder_id, filename, csv_data)
         
         if file_id:
             success_message = f"Feedly archiver function completed: Batch file uploaded successfully with {len(transformed_articles)} articles"
@@ -252,28 +284,22 @@ if __name__ == "__main__":
     articles = fetch_feedly_articles(feedly_token, stream_id, newer_than_timestamp_ms)
     
     if articles:
-        # Transform all articles to JSON structure
+        # Transform all articles to CSV structure
         transformed_articles = []
         for article in articles:
             try:
-                transformed_article = transform_to_json_structure(article)
+                transformed_article = transform_to_csv_structure(article)
                 transformed_articles.append(transformed_article)
             except Exception as e:
                 logger.error(f"Error transforming article {article.get('id', 'unknown')}: {e}")
         
         if transformed_articles:
-            # Create batch JSON data
-            batch_data = {
-                "fetch_date": datetime.now().isoformat() + 'Z',
-                "total_articles": len(transformed_articles),
-                "articles": transformed_articles
-            }
-            
+            # Create CSV data
             filename = generate_batch_filename()
-            json_data = json.dumps(batch_data, indent=2, ensure_ascii=False)
+            csv_data = generate_csv_content(transformed_articles)
             
             if google_drive_folder_id and service_account_file:
-                file_id = upload_to_google_drive(service_account_file, google_drive_folder_id, filename, json_data)
+                file_id = upload_to_google_drive(service_account_file, google_drive_folder_id, filename, csv_data)
                 if file_id:
                     logger.info(f"Successfully uploaded batch file: {filename} (ID: {file_id}) with {len(transformed_articles)} articles")
                 else:
