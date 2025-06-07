@@ -13,7 +13,6 @@ google-auth = "^2.40.2"
 requests = "^2.32.3"
 pathvalidate = "^3.2.3"
 python-dotenv = "^1.1.0"
-schedule = "^1.2.2"
 
 
 [build-system]

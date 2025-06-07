@@ -13,8 +13,10 @@ __pycache__/
 # Google Service Account keys (DO NOT COMMIT)
 service-account-key.json
 *-service-account-key.json
-*.json
-!pyproject.toml
+*service-account*.json
+*-credentials.json
+*.key.json
+cosmic-talent-*.json
 
 # C extensions
 *.so

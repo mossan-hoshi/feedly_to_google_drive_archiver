@@ -1,5 +1,7 @@
 # Feedly から Google Drive へのアーカイバー
 
+> 🚀 **すぐに始めたい場合は**: [QUICKSTART.md](QUICKSTART.md) で5分デプロイガイドを確認してください
+
 ## プロジェクト概要
 
 このプロジェクトは、指定された期間のFeedlyアカウントから記事を自動的に取得し、Google Driveの指定されたフォルダに個別のJSONファイルとして保存するサーバーレスソリューションを提供します。無料枠を活用してコストを最小限に抑えることに重点を置き、Google Cloud Platform（GCP）でのホスティング用に設計されています。
@@ -113,141 +115,223 @@
 
 ## セットアップ手順
 
-### 1. GCPプロジェクトの設定
+### 🚀 クイックスタート（推奨）
 
-* GCPプロジェクトが選択されていることを確認：
-    ```bash
-    gcloud config set project YOUR_PROJECT_ID
-    ```
-* 必要なAPIを有効化：
-    ```bash
-    gcloud services enable cloudfunctions.googleapis.com \
-                           cloudscheduler.googleapis.com \
-                           drive.googleapis.com \
-                           cloudbuild.googleapis.com \
-                           run.googleapis.com \
-                           iam.googleapis.com \
-                           artifactregistry.googleapis.com
-    ```
+最も簡単な方法でデプロイしたい場合は、提供されている自動化スクリプトを使用してください：
 
-### 2. サービスアカウントの作成と設定
+#### 1. リポジトリをクローン
+```bash
+git clone <repository-url>
+cd feedly_to_google_drive_archiver
+```
 
-このサービスアカウントはCloud Functionで使用されます。
+#### 2. 自動デプロイスクリプトを実行
+```bash
+./deploy.sh YOUR_PROJECT_ID [REGION]
+```
 
-* サービスアカウントを作成：
-    ```bash
-    gcloud iam service-accounts create feedly-archiver-sa \
-        --display-name="Feedly Archiver Service Account"
-    ```
-* サービスアカウントにロールを付与（`YOUR_PROJECT_ID`を調整）：
-    * ログを書き込むため：
-        ```bash
-        gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-            --member="serviceAccount:feedly-archiver-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-            --role="roles/logging.logWriter"
-        ```
+#### 3. スケジューラーをセットアップ
+```bash
+./scheduler.sh YOUR_PROJECT_ID [REGION] [SCHEDULE] [TIMEZONE]
+```
 
-### 3. 環境変数ファイルの設定
+**完了！** 詳細な手順については、[DEPLOYMENT.md](DEPLOYMENT.md) を参照してください。
 
-* プロジェクトルートに`.env`ファイルを作成：
-    ```bash
-    touch .env
-    ```
-* `.env`ファイルに必要な環境変数を設定：
-    ```bash
-    # Feedly API設定
-    FEEDLY_ACCESS_TOKEN=YOUR_FEEDLY_ACCESS_TOKEN
-    FEEDLY_STREAM_ID=user/YOUR_FEEDLY_USER_ID/category/global.all
-    
-    # Google Drive設定
-    GOOGLE_DRIVE_FOLDER_ID=YOUR_GOOGLE_DRIVE_FOLDER_ID
-    
-    # GCP設定
-    GCP_PROJECT_ID=YOUR_PROJECT_ID
-    
-    # アプリケーション設定
-    FETCH_PERIOD_DAYS=7
-    ```
-    （各プレースホルダーを実際の値に置き換えてください）
+---
 
+### 📋 手動セットアップ（詳細制御が必要な場合）
 
-### 4. Google Driveフォルダをサービスアカウントと共有
+#### 1. 事前準備
 
-* Google Driveにアクセス
-* 対象フォルダを見つける
-* 「共有」をクリック
-* 作成したサービスアカウントのメールアドレスを入力：`feedly-archiver-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com`
-* 「編集者」権限を付与
-* 「送信」または「保存」をクリック
+**Google Cloud Platform (GCP) 要件:**
+- GCPプロジェクトが作成済み
+- Google Cloud SDK (gcloud CLI) がインストール・設定済み
+- 課金が有効化済み（無料枠での運用を想定）
 
-### 5. 依存関係の管理（Poetry）
+**Feedly 要件:**
+- Feedlyアカウント
+- 開発者アクセストークン（[https://feedly.com/v3/auth/dev](https://feedly.com/v3/auth/dev) で取得）
+- 対象ストリームID（例：`user/YOUR_USER_ID/category/global.all`）
 
-* Poetryがインストールされていない場合はインストール：
-    ```bash
-    curl -sSL https://install.python-poetry.org | python3 -
-    ```
-* プロジェクトディレクトリで依存関係をインストール：
-    ```bash
-    poetry install
-    ```
-* 新しい依存関係を追加する場合：
-    ```bash
-    poetry add package-name
-    ```
+**Google Drive 要件:**
+- アーカイブ用フォルダ作成済み
+- フォルダID（URLの`folders/`以降の部分）
 
-### 6. Cloud Functionコードの準備
+#### 2. GCPプロジェクトの設定
 
-    ```
-* **`main.py`：**（完全なコードについては、リポジトリの`main.py`ファイルを参照してください。dotenvを使用した環境変数の読み込みを含みます）
+```bash
+# プロジェクトを設定
+gcloud config set project YOUR_PROJECT_ID
 
-### 7. Cloud Functionのデプロイ
+# 必要なAPIを有効化
+gcloud services enable cloudfunctions.googleapis.com \
+                       cloudscheduler.googleapis.com \
+                       drive.googleapis.com \
+                       cloudbuild.googleapis.com \
+                       run.googleapis.com \
+                       iam.googleapis.com \
+                       artifactregistry.googleapis.com
+```
 
-* Cloud Function用のrequirements.txtを生成：
-    ```bash
-    poetry export -f requirements.txt --output requirements.txt --without-hashes
-    ```
-* `main.py`と`requirements.txt`を含むディレクトリに移動
-* Cloud Function（第2世代）をデプロイ：
-    ```bash
-    gcloud functions deploy feedly-to-drive-archiver \
-        --gen2 \
-        --runtime python311 \
-        --region YOUR_GCP_REGION \
-        --source . \
-        --entry-point main \
-        --trigger-http \
-        --allow-unauthenticated \
-        --service-account feedly-archiver-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-        --set-env-vars FEEDLY_ACCESS_TOKEN="YOUR_FEEDLY_ACCESS_TOKEN",GOOGLE_DRIVE_FOLDER_ID="YOUR_GOOGLE_DRIVE_FOLDER_ID",FEEDLY_STREAM_ID="user/YOUR_FEEDLY_USER_ID/category/global.all",FETCH_PERIOD_DAYS="7",GCP_PROJECT_ID="YOUR_PROJECT_ID"
-    ```
-    * `YOUR_GCP_REGION`を置き換える（例：`us-central1`）
-    * 指示されている箇所の`YOUR_PROJECT_ID`を置き換える
-    * 環境変数の値を`.env`ファイルの値と同じに設定する
-    * 必要に応じて`FETCH_PERIOD_DAYS`を調整
+#### 3. サービスアカウントの作成（オプション）
 
-### 8. Cloud Schedulerの設定
+```bash
+# サービスアカウントを作成
+gcloud iam service-accounts create feedly-archiver-sa \
+    --display-name="Feedly Archiver Service Account"
 
-* デプロイ出力またはGCPコンソールからデプロイされたCloud FunctionのURLを取得します。`https://YOUR_REGION-YOUR_PROJECT_ID.cloudfunctions.net/feedly-to-drive-archiver`のようになります
-* Cloud Schedulerジョブを作成：
-    ```bash
-    gcloud scheduler jobs create http feedly-archive-job \
-        --schedule "0 3 * * *" \
-        --uri "YOUR_FUNCTION_TRIGGER_URL" \
-        --http-method GET \
-        --time-zone "America/Los_Angeles" \
-        --description "Triggers Feedly to Drive archiver function daily."
-    ```
-    * `YOUR_FUNCTION_TRIGGER_URL`を実際のURLに置き換える
-    * 必要に応じて`--schedule`（cron構文）を調整（例：毎日午前3時の場合は「0 3 * * *」）
-    * `--time-zone`を調整
+# ログ書き込み権限を付与
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:feedly-archiver-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/logging.logWriter"
+```
 
-## 使用方法
+#### 4. Google Driveフォルダを共有
 
-デプロイとスケジュール設定後：
+1. Google Driveで対象フォルダを開く
+2. 「共有」をクリック
+3. サービスアカウントのメールアドレスを追加：  
+   `feedly-archiver-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com`
+4. 「編集者」権限を付与
 
-* Cloud FunctionはCloud Schedulerジョブに従って自動的に実行されます
-* 記事データを含むJSONファイルが指定されたGoogle Driveフォルダに表示されます
-* 実行の詳細やエラーについては、ファンクション（`feedly-to-drive-archiver`）のCloud Loggingを確認してください
+#### 5. 依存関係の準備
+
+```bash
+# Poetry環境をセットアップ（初回のみ）
+poetry install
+
+# Cloud Function用requirements.txtを生成
+poetry export -f requirements.txt --output requirements.txt --without-hashes
+```
+
+#### 6. Cloud Functionのデプロイ
+
+```bash
+gcloud functions deploy feedly-to-drive-archiver \
+    --gen2 \
+    --runtime python311 \
+    --region us-central1 \
+    --source . \
+    --entry-point main \
+    --trigger-http \
+    --allow-unauthenticated \
+    --service-account feedly-archiver-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+    --timeout 540s \
+    --memory 512Mi \
+    --set-env-vars FEEDLY_ACCESS_TOKEN="YOUR_TOKEN",GOOGLE_DRIVE_FOLDER_ID="YOUR_FOLDER_ID",FEEDLY_STREAM_ID="YOUR_STREAM_ID",FETCH_PERIOD_DAYS="7",GCP_PROJECT_ID="YOUR_PROJECT_ID"
+```
+
+#### 7. Cloud Schedulerの設定
+
+```bash
+gcloud scheduler jobs create http feedly-archive-job \
+    --location us-central1 \
+    --schedule "0 3 * * *" \
+    --uri "https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/feedly-to-drive-archiver" \
+    --http-method GET \
+    --time-zone "America/Los_Angeles" \
+    --description "Triggers Feedly to Drive archiver function daily."
+```
+
+## 使用方法とモニタリング
+
+### 自動実行
+
+デプロイ完了後、システムは完全に自動化されます：
+
+✅ **自動スケジュール実行**  
+- Cloud Schedulerが設定されたスケジュール（デフォルト：毎日午前3時）で自動実行
+- Feedlyから新しい記事を取得してGoogle Driveに保存
+
+✅ **結果の確認**  
+- Google Driveの指定フォルダにJSONファイルが作成される
+- ファイル名形式：`YYYYMMDD_記事ID.json`
+
+### 手動実行とテスト
+
+#### Cloud Functionを直接テスト
+```bash
+# 手動で関数を実行
+gcloud functions call feedly-to-drive-archiver --region=us-central1
+
+# 実行ログを確認
+gcloud functions logs read feedly-to-drive-archiver --region=us-central1 --limit=20
+```
+
+#### Schedulerジョブを手動実行
+```bash
+# スケジューラージョブを手動トリガー
+gcloud scheduler jobs run feedly-archive-job --location=us-central1
+
+# ジョブの状態確認
+gcloud scheduler jobs describe feedly-archive-job --location=us-central1
+```
+
+### ログとモニタリング
+
+#### Cloud Loggingでログ確認
+```bash
+# 最新のログを表示
+gcloud logging read "resource.type=cloud_function AND resource.labels.function_name=feedly-to-drive-archiver" --limit=50 --format="table(timestamp,severity,textPayload)"
+
+# エラーログのみ表示
+gcloud logging read "resource.type=cloud_function AND resource.labels.function_name=feedly-to-drive-archiver AND severity>=ERROR" --limit=20
+```
+
+#### GCPコンソールでの確認
+- **Cloud Functions**: [https://console.cloud.google.com/functions](https://console.cloud.google.com/functions)
+- **Cloud Scheduler**: [https://console.cloud.google.com/cloudscheduler](https://console.cloud.google.com/cloudscheduler)
+- **ログビューアー**: [https://console.cloud.google.com/logs](https://console.cloud.google.com/logs)
+
+### 設定の調整
+
+#### 実行頻度の変更
+```bash
+# 例：毎時実行に変更
+gcloud scheduler jobs update http feedly-archive-job \
+    --location=us-central1 \
+    --schedule="0 * * * *"
+
+# 例：週1回（日曜日午前3時）に変更
+gcloud scheduler jobs update http feedly-archive-job \
+    --location=us-central1 \
+    --schedule="0 3 * * 0"
+```
+
+#### 取得期間の変更
+```bash
+# 例：過去14日間の記事を取得するように変更
+gcloud functions deploy feedly-to-drive-archiver \
+    --region=us-central1 \
+    --update-env-vars FETCH_PERIOD_DAYS=14
+```
+
+### 一時停止と再開
+
+#### 一時的に停止
+```bash
+# Schedulerジョブを一時停止
+gcloud scheduler jobs pause feedly-archive-job --location=us-central1
+```
+
+#### 再開
+```bash
+# Schedulerジョブを再開
+gcloud scheduler jobs resume feedly-archive-job --location=us-central1
+```
+
+### トラブルシューティング
+
+よくある問題と解決方法については、[DEPLOYMENT.md](DEPLOYMENT.md) の「トラブルシューティング」セクションを参照してください。
+
+#### 緊急時の対応
+```bash
+# すべてのジョブを一時停止
+gcloud scheduler jobs pause feedly-archive-job --location=us-central1
+
+# 関数を削除（完全停止）
+gcloud functions delete feedly-to-drive-archiver --region=us-central1
+```
 
 ## コスト最適化
 
@@ -348,14 +432,28 @@
 
 ### フェーズ3: デプロイとスケジューリング
 
-* **TODO 3.1: デプロイスクリプト/コマンドの作成（セットアップ手順として）**
-    * アクション：必要なすべてのフラグと環境変数を含む`gcloud functions deploy`コマンドをREADMEに文書化
-    * アクション：デプロイ前の`poetry export`コマンドを含める
-    * 検証：コマンドが正確で、ユーザー固有の値のプレースホルダーを含む
+* ✅ **TODO 3.1: デプロイスクリプト/コマンドの作成（セットアップ手順として）**
+    * ✅ アクション：必要なすべてのフラグと環境変数を含む`gcloud functions deploy`コマンドをREADMEに文書化
+    * ✅ アクション：デプロイ前の`poetry export`コマンドを含める
+    * ✅ アクション：自動化デプロイスクリプト`deploy.sh`を作成
+    * ✅ アクション：対話形式で環境変数を安全に入力できる仕組みを実装
+    * ✅ 検証：コマンドが正確で、ユーザー固有の値のプレースホルダーを含む
 
-* **TODO 3.2: Cloud Schedulerセットアップスクリプト/コマンドの作成（セットアップ手順として）**
-    * アクション：`gcloud scheduler jobs create http`コマンドをREADMEに文書化
-    * 検証：コマンドが正確で、関数URLの取得方法を含む
+* ✅ **TODO 3.2: Cloud Schedulerセットアップスクリプト/コマンドの作成（セットアップ手順として）**
+    * ✅ アクション：`gcloud scheduler jobs create http`コマンドをREADMEに文書化
+    * ✅ アクション：自動化スケジューラースクリプト`scheduler.sh`を作成
+    * ✅ アクション：スケジュール、タイムゾーン、リージョンをカスタマイズできる機能を実装
+    * ✅ アクション：既存ジョブの検出と更新機能を追加
+    * ✅ アクション：手動テスト実行オプションを追加
+    * ✅ 検証：コマンドが正確で、関数URLの取得方法を含む
+
+* ✅ **TODO 3.3: 管理ユーティリティとドキュメントの作成**
+    * ✅ アクション：システム管理用のスクリプト`manage.sh`を作成
+    * ✅ アクション：状態確認、ログ表示、手動実行、設定変更機能を実装
+    * ✅ アクション：詳細デプロイメントガイド`DEPLOYMENT.md`を作成
+    * ✅ アクション：クイックスタートガイド`QUICKSTART.md`を作成
+    * ✅ アクション：トラブルシューティングセクションを追加
+    * ✅ 検証：包括的な管理ツールとドキュメントが完成
 
 ### フェーズ4: テストと改良
 

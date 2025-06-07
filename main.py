@@ -21,7 +21,6 @@ import logging
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-from pathvalidate import sanitize_filename
 from io import BytesIO
 import google.auth
 from google.oauth2 import service_account
@@ -98,15 +97,14 @@ def transform_to_json_structure(article_data: Dict) -> Dict:
         return {"title": "", "url": "", "starCount": 0, "publishedDate": ""}
 
 
-def generate_safe_filename(article: Dict) -> str:
+def generate_batch_filename() -> str:
+    """Generate filename for batch of articles"""
     try:
-        published_timestamp = article.get("published", 0)
-        date_str = datetime.utcfromtimestamp(published_timestamp / 1000).strftime('%Y%m%d') if published_timestamp else "unknown"
-        safe_id = sanitize_filename(article.get("id", "unknown"))
-        return f"{date_str}_{safe_id}.json"
+        current_time = datetime.now()
+        return f"feedly_articles_{current_time.strftime('%Y%m%d_%H%M%S')}.json"
     except Exception as e:
         logger.error(f"Error generating filename: {e}")
-        return f"article_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        return f"feedly_articles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
 
 def upload_to_google_drive_adc(folder_id: str, file_name: str, json_data_string: str) -> Optional[str]:
@@ -182,49 +180,51 @@ def main(request):
         
         logger.info(f"Successfully fetched {len(articles)} articles from Feedly")
         
-        upload_count = 0
-        error_count = 0
-        processed_files = []
-        
-        logger.info("Starting article processing and upload")
-        
-        for i, article in enumerate(articles):
+        # Transform all articles to JSON structure
+        transformed_articles = []
+        for article in articles:
             try:
-                logger.debug(f"Processing article {i+1}/{len(articles)}: {article.get('title', 'Untitled')[:50]}...")
-                
                 transformed_article = transform_to_json_structure(article)
-                filename = generate_safe_filename(article)
-                json_data = json.dumps(transformed_article, indent=2, ensure_ascii=False)
-                
-                file_id = upload_to_google_drive_adc(google_drive_folder_id, filename, json_data)
-                
-                if file_id:
-                    upload_count += 1
-                    processed_files.append({
-                        "filename": filename, 
-                        "file_id": file_id, 
-                        "title": transformed_article.get('title', 'Untitled')
-                    })
-                    logger.info(f"Successfully uploaded: {filename} (ID: {file_id})")
-                else:
-                    error_count += 1
-                    logger.error(f"Failed to upload: {filename}")
-                    
+                transformed_articles.append(transformed_article)
             except Exception as e:
-                error_count += 1
-                logger.error(f"Error processing article {article.get('id', 'unknown')}: {e}")
+                logger.error(f"Error transforming article {article.get('id', 'unknown')}: {e}")
         
-        # Return final results
-        success_message = f"Feedly archiver function completed: {upload_count}/{len(articles)} files uploaded successfully"
-        logger.info(success_message)
+        if not transformed_articles:
+            logger.warning("No articles were successfully transformed")
+            return {"message": "No articles were successfully transformed", "articles_processed": 0}, 200
         
-        return {
-            "message": success_message,
-            "articles_fetched": len(articles),
-            "files_uploaded": upload_count,
-            "upload_errors": error_count,
-            "processed_files": processed_files
-        }, 200
+        # Create batch JSON data
+        batch_data = {
+            "fetch_date": datetime.now().isoformat() + 'Z',
+            "total_articles": len(transformed_articles),
+            "articles": transformed_articles
+        }
+        
+        filename = generate_batch_filename()
+        json_data = json.dumps(batch_data, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Starting upload of batch file: {filename}")
+        
+        file_id = upload_to_google_drive_adc(google_drive_folder_id, filename, json_data)
+        
+        if file_id:
+            success_message = f"Feedly archiver function completed: Batch file uploaded successfully with {len(transformed_articles)} articles"
+            logger.info(f"Successfully uploaded batch file: {filename} (ID: {file_id})")
+            
+            return {
+                "message": success_message,
+                "articles_fetched": len(articles),
+                "articles_processed": len(transformed_articles),
+                "batch_file": {
+                    "filename": filename,
+                    "file_id": file_id,
+                    "article_count": len(transformed_articles)
+                }
+            }, 200
+        else:
+            error_message = f"Failed to upload batch file: {filename}"
+            logger.error(error_message)
+            return {"error": error_message}, 500
         
     except Exception as e:
         logger.error(f"Unexpected error in main function: {e}")
@@ -252,21 +252,35 @@ if __name__ == "__main__":
     articles = fetch_feedly_articles(feedly_token, stream_id, newer_than_timestamp_ms)
     
     if articles:
-        upload_count = 0
-        error_count = 0
-        
+        # Transform all articles to JSON structure
+        transformed_articles = []
         for article in articles:
-            transformed_article = transform_to_json_structure(article)
-            filename = generate_safe_filename(article)
-            json_data = json.dumps(transformed_article, indent=2, ensure_ascii=False)
+            try:
+                transformed_article = transform_to_json_structure(article)
+                transformed_articles.append(transformed_article)
+            except Exception as e:
+                logger.error(f"Error transforming article {article.get('id', 'unknown')}: {e}")
+        
+        if transformed_articles:
+            # Create batch JSON data
+            batch_data = {
+                "fetch_date": datetime.now().isoformat() + 'Z',
+                "total_articles": len(transformed_articles),
+                "articles": transformed_articles
+            }
+            
+            filename = generate_batch_filename()
+            json_data = json.dumps(batch_data, indent=2, ensure_ascii=False)
             
             if google_drive_folder_id and service_account_file:
                 file_id = upload_to_google_drive(service_account_file, google_drive_folder_id, filename, json_data)
                 if file_id:
-                    upload_count += 1
+                    logger.info(f"Successfully uploaded batch file: {filename} (ID: {file_id}) with {len(transformed_articles)} articles")
                 else:
-                    error_count += 1
+                    logger.error(f"Failed to upload batch file: {filename}")
+            else:
+                logger.info(f"Would upload batch file: {filename} with {len(transformed_articles)} articles")
         
-        logger.info(f"Processed: {len(articles)}, Uploaded: {upload_count}, Errors: {error_count}")
+        logger.info(f"Processed: {len(articles)} articles fetched, {len(transformed_articles)} articles transformed")
     else:
         logger.warning("No articles were fetched.")
